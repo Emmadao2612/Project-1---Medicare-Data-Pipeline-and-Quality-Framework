@@ -71,7 +71,7 @@ This project documents a quality check framework applied to the 2023 dataset. Th
 **Centers for Medicare & Medicaid Services (CMS)**
 Medicare Physician & Other Practitioners - By Provider and Service, 2023.
 
-[Click to download the dataset here.](https://data.cms.gov/provider-summary-by-type-of-service/medicare-physician-other-practitioners/medicare-physician-other-practitioners-by-provider-and-service)
+[Click to download the dataset here.](https://data.cms.gov/provider-summary-by-type-of-service/medicare-physician-other-practitioners/medicare-physician-other-practitioners-by-provider-and-service/data/2023)
 
 ### What this dataset is
 
@@ -116,7 +116,7 @@ Skipping quality checks not only risks minor inaccuracies but also produces spec
 | Quality check | Without filter | With filter | Impact on findings |
 |----|----|----|----|
 | COVID vaccine code exclusion (Query 1.7, 1.23) | Billed-to-allowed ratio:<br>Pharmacy: 3,438;<br> Emergency Medicine: 2,754;<br> Cardiology: 2,191 | Billed-to-allowed ratio:<br>Pharmacy: 1;<br> Emergency Medicine: 6;<br> Cardiology: 3 | Corrupts the specialty ratio analysis for some specialties |
-| Drug procedure filter (Query 1.24) | Rural payment gap: +$0.21 (Negligible) | -$6.36 | With the drug filter applied, a real payment gap emerges<br> Without the filter, drugs dominate rural payment and mask the true urban-rural physician pay gap |
+| Drug procedure filter (Query 1.24) | Rural payment gap: +$0.21 (Negligible) | Rural payment gap: -$6.36 | With the drug filter applied, a real payment gap emerges<br> Without the filter, drugs dominate rural payment and mask the true urban-rural physician pay gap |
 | Billing ceiling exclusion ($99,999.99) (Query 1.4, 1.6, 1.25) | Unknown true maximum value (12 rows) | $99,999.68 - a legitimate high-cost procedure | Prevents Z-score contamination in Project 4 |
 | Logical violation exclusion (Query 1.6) | 7,861 rows with logical violations<br> (6,573 rows where allowed > billed + 1,288 rows paid > billed) | 0 such rows | Prevents ratios below 1.0 in billing analysis |
 | Geographic exclusions (Query 1.1, 1.10, 1.11, 1.15, 1.16) | 62 distinct jurisdictions<br> (50 states + DC + territories + military codes) | 50 states + DC | Prevents military codes from distorting geographic analysis |
@@ -165,6 +165,7 @@ Check for values that are present but logically impossible.
 | total_patients between 1-10 | 0 | No CMS suppression rows where total_patients < 11 |
 
 **Note:**
+
 Base population differs by query. 
 - Query 1.6 requires avg_medicare_payment, avg_billed_charge, and avg_allowed_amount > 0 (9,660,581 rows) - avg_billed_charge has no zero values, and the 13 zero-allowed-amount rows are a subset of the 66 zero-payment rows.
 - Query 1.7 requires avg_billed_charge and avg_allowed_amount > 0. 
@@ -246,12 +247,13 @@ WHERE avg_medicare_payment      > 0                             -- Phase 2: zero
   AND country                   = 'US'                          -- Phase 4: US providers only
   AND state NOT IN (
       'AP','AE','AA','ZZ','XX','FM',                            -- Phase 4: military and unresolvable
-      'PR','GU','VI','MP','AS'                                  -- Phase 4: territories
-  )
+      'PR','GU','VI','MP','AS')                                 -- Phase 4: territories
 ```
 
-Note: This baseline does not exclude NULL/Blank/'99' RUCA codes, nor rows where avg_standardized_payment = 0. Any downstream query must apply these exclusions based on which columns it uses: 
-- Queries using ruca_urban_code must exclude NULL, blank, and '99' values.
+**Note:**
+
+This baseline does not exclude Null/Blank/'99' RUCA codes, nor rows where avg_standardized_payment = 0. Any downstream query must apply these exclusions based on which columns it uses: 
+- Queries using ruca_urban_code must exclude Null, Blank, and '99' values.
 - Queries using avg_standardized_payment must exclude 0 values.
 
 ```sql
@@ -261,8 +263,7 @@ WHERE ruca_urban_code IS NOT NULL
     AND avg_standardized_payment > 0;
 ```
 
-**Rows excluded:** approximately 564,447 (<6% of 9,660,647)
-**Rows retained for analysis:** 9,096,200 (> 94%)
+**Rows excluded:** approximately 564,447 (<6% of 9,660,647). **Rows retained for analysis:** 9,096,200 (> 94%).
 
 ---
 
@@ -277,7 +278,7 @@ hc.medicare_providers_raw - Raw table: CMS column names, never modified
 hc.medicare_providers_view - Semantic view: readable aliases, used by all queries
 ```
 
-### Why a raw table + semantic view
+### Why we need both a raw table and a semantic view
 
 The raw table preserves the original CMS structure exactly. The semantic view provides readable aliases (e.g. `Rndrng_Prvdr_Type` as `provider_specialty`) used consistently across all downstream queries. If CMS changes column names in a future release, only the view needs updating, not every analytical query.
 
@@ -293,7 +294,9 @@ Five indexes built on the raw table after data loading. The view inherits them a
 | idx_npi | Rndrng_NPI | Project 4 - Provider-level aggregation |
 | idx_ruca | Rndrng_Prvdr_RUCA | Project 3 - Urban/rural classification |
 
-**Note:** Indexes are built after loading all data, never before. Building indexes during a 9.66M row bulk import forces PostgreSQL to update the index structure for every row, which is 5x to 10x slower than indexing once on the completed dataset.
+**Note:** 
+
+Indexes are built after loading all data, never before. Building indexes during a 9.66M row bulk import forces PostgreSQL to update the index structure for every row, which is 5x to 10x slower than indexing once on the completed dataset.
 
 ---
 
